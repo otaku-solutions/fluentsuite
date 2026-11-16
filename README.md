@@ -45,7 +45,7 @@ routes under `/wp-json/fluentsuite/v1/smtp/`. Copy that folder to `wp-content/pl
 FluentSuite is not on npm yet. Build it from source:
 
 ```sh
-git clone https://github.com/hamchowderr/fluentsuite.git
+git clone https://github.com/otaku-solutions/fluentsuite.git
 cd fluentsuite
 pnpm install
 pnpm build
