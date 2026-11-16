@@ -1,7 +1,7 @@
 <?php
 /**
  * Plugin Name:       FluentSuite Bridge
- * Plugin URI:        https://github.com/hamchowderr/fluentsuite
+ * Plugin URI:        https://github.com/otaku-solutions/fluentsuite
  * Description:       REST routes for FluentSuite (an MCP server) where a Fluent plugin has no REST API of its own. Today: FluentSMTP. Independent project, not affiliated with WPManageNinja.
  * Version:           0.2.1
  * Requires at least: 6.2

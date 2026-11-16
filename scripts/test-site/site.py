@@ -189,7 +189,7 @@ def create():
     if any(s['name'] == SERVICE for s in api('GET', '/services')):
         sys.exit(f'{SERVICE} already exists; remove it first')
     uuid = api('POST', '/services', {
-        'name': SERVICE, 'description': 'FluentSuite test site. Runbook docs/test-site.md in hamchowderr/fluentsuite',
+        'name': SERVICE, 'description': 'FluentSuite test site. Runbook docs/test-site.md in otaku-solutions/fluentsuite',
         'project_uuid': project, 'environment_name': 'production',
         'server_uuid': env('COOLIFY_SERVER_UUID', 'create'),
         'docker_compose_raw': compose(False), 'urls': [{'name': CONTAINER, 'url': SITE}],
