@@ -1,14 +1,13 @@
-# Builds the FluentSuite Docker image here instead of on the server that runs it (release/README.md). Both Coolify
-# apps (fluentsuite and fluentsuite-staging) run the same image, built from the root Dockerfile. A pull request only
-# builds it; main also publishes it to GHCR as ghcr.io/otaku-solutions/fluentsuite (private) and moves the release
-# branch, which Coolify deploys from, so the server only downloads an image that already exists.
+# Builds the FluentSuite Docker image on GitHub instead of on the host that runs it (release/README.md). A pull
+# request only builds it; main also publishes it to GHCR as ghcr.io/otaku-solutions/fluentsuite (private) and moves the
+# release branch, which deployments use, so the host only downloads an image that already exists.
 name: Image
 
 on:
   pull_request:
     paths-ignore: ['**/*.md', 'docs/**']
-  # No path filter on main: a skipped docs-only commit would leave main's tip without a run, and the run for the
-  # commit before it would then refuse to release because it is no longer the tip.
+  # No path filter on main: a skipped docs-only commit would leave main's tip with no image, so nothing could
+  # release it.
   push:
     branches: [main]
   workflow_dispatch:
@@ -16,7 +15,7 @@ on:
 concurrency:
   # A pull request's runs share a group and the newest cancels the rest. Every other run (a main push, a re-run, a
   # manual run) gets its own group, so none can cancel another's publish; the release job below runs one at a time and
-  # decides which commit moves `latest` and the release branch.
+  # always promotes main's newest published commit.
   group: image-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
@@ -62,16 +61,17 @@ jobs:
           labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
           cache-from: type=gha,scope=fluentsuite
 
-  # Moves `latest` and the branch release/fluentsuite, which Coolify deploys from (release/fluentsuite.Dockerfile), to
-  # this commit, so the server only ever picks up a commit whose image is already published. Only main's newest commit
-  # may do this: a re-run of an older commit's workflow keeps that commit's SHA, and would otherwise roll the apps back.
+  # Points `latest` and the branch release/fluentsuite, which deployments build (release/fluentsuite.Dockerfile), at
+  # main's newest commit, once that commit's image is published, so a deploy never asks for a missing image. It always
+  # promotes main's tip, never this run's own commit, so a re-run of an older commit cannot roll the release back, and
+  # whichever run's job ends up running releases the right commit.
   release:
     needs: image
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # One release job at a time across all commits, so the tip check and the promotion below cannot interleave with
-    # another commit's. A newer queued job replaces an older queued one, which would have found itself stale anyway.
+    # One release job at a time across all commits, so the tip lookup and the promotion cannot interleave with another
+    # run's. A queued job may replace another queued one; that is safe because every job promotes the same tip.
     concurrency:
       group: image-release
       cancel-in-progress: false
@@ -82,24 +82,23 @@ jobs:
       IMAGE: ghcr.io/${{ github.repository_owner }}/fluentsuite
     steps:
       - uses: actions/checkout@v7
-      - name: Is this main's newest commit?
-        id: fresh
-        # bash with pipefail: a failed lookup fails the step instead of quietly skipping the release.
-        shell: bash
-        run: |
-          tip=$(git ls-remote origin refs/heads/main | cut -f1)
-          if [ "$tip" = "$GITHUB_SHA" ]; then echo "newest=true" >> "$GITHUB_OUTPUT"; else echo "newest=false" >> "$GITHUB_OUTPUT"; echo "main is at $tip; leaving latest and the release branch to its run"; fi
-      - if: steps.fresh.outputs.newest == 'true'
-        uses: docker/setup-buildx-action@v4
-      - if: steps.fresh.outputs.newest == 'true'
-        uses: docker/login-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Release
-        if: steps.fresh.outputs.newest == 'true'
+      - name: Release main's newest commit
+        # bash with pipefail: a failed lookup fails the step instead of quietly skipping the release.
         shell: bash
         run: |
-          docker buildx imagetools create --tag "$IMAGE:latest" "$IMAGE:sha-$GITHUB_SHA"
-          git push --force origin "HEAD:refs/heads/release/fluentsuite"
+          tip=$(git ls-remote origin refs/heads/main | cut -f1)
+          [ -n "$tip" ] || { echo "could not read main's tip"; exit 1; }
+          if ! out=$(docker buildx imagetools inspect "$IMAGE:sha-$tip" 2>&1); then
+            if grep -qi 'not found' <<<"$out"; then echo "main is at $tip, whose image is not published yet; its own run releases it"; exit 0; fi
+            echo "$out"; exit 1
+          fi
+          docker buildx imagetools create --tag "$IMAGE:latest" "$IMAGE:sha-$tip"
+          git fetch --depth 1 origin "$tip"
+          git push --force origin "$tip:refs/heads/release/fluentsuite"
+          echo "released $tip"
